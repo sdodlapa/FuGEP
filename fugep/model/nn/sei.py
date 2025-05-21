@@ -131,7 +131,7 @@ class BSplineConv1D(nn.Module):
 
 
 class Sei(nn.Module):
-    def __init__(self, sequence_length=4096, n_genomic_features=72):
+    def __init__(self, sequence_length=4096, n_genomic_features=21907):
         """
         Parameters
         ----------

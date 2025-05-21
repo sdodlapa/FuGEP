@@ -75,11 +75,13 @@ class PeakGVarEvaluator(GVarEvaluator):
     
     def _getRefIdxs(self, refLen):
         '''
-        Assume the reference is centered in the sequence
+        Calculate the indices for placing reference sequence in the window.
+        For odd length sequences, reference is centered exactly.
+        For even length sequences, reference is placed at position seq_len/2.
         '''
         mid = self._seqLen // 2
-        if self._seqLen % 2 == 0:
-            mid -= 1
+        # For even length sequences, we place ref at position seq_len/2 (0-indexed)
+        # For odd length sequences, this remains the same as before
         startPos = mid - refLen // 2
         endPos = startPos + refLen
         return (startPos, endPos)
@@ -155,9 +157,31 @@ class PeakGVarEvaluator(GVarEvaluator):
         # does not match refEnc (from vcf), refEnc is used
         refLen = refEnc.shape[0]
         startPos, _ = self._getRefIdxs(refLen)
-    
+        
+        # For even-length sequences, try adjacent positions if the exact match fails
+        # This helps adjust for potential off-by-one errors in positioning
         seqEncAtRef = seqEnc[startPos:startPos + refLen, :]
         match = np.array_equal(seqEncAtRef, refEnc)
+        
+        # If no match, try one position to the left (for even-length windows)
+        if not match and self._seqLen % 2 == 0 and startPos > 0:
+            alt_pos = startPos - 1
+            alt_seq = seqEnc[alt_pos:alt_pos + refLen, :]
+            alt_match = np.array_equal(alt_seq, refEnc)
+            if alt_match:
+                match = True
+                startPos = alt_pos
+                seqEncAtRef = alt_seq
+        
+        # If still no match, try one position to the right (for even-length windows)
+        if not match and self._seqLen % 2 == 0 and startPos + refLen + 1 <= seqEnc.shape[0]:
+            alt_pos = startPos + 1
+            alt_seq = seqEnc[alt_pos:alt_pos + refLen, :]
+            alt_match = np.array_equal(alt_seq, refEnc)
+            if alt_match:
+                match = True
+                startPos = alt_pos
+                seqEncAtRef = alt_seq
     
         seqAtRef = None
         if not match:
@@ -275,8 +299,10 @@ class PeakGVarEvaluator(GVarEvaluator):
         batchRefSeqs, batchAltSeqs, batchIds = [], [], []
         stepTime = time()
         for ix, (chrom, pos, name, ref, alt, strand) in enumerate(self._variants):
-            # centers the sequence containing the ref allele based on the size
-            # of ref
+            # Handle both odd and even length sequence windows
+            seq_len = self._startRadius + self._endRadius
+            # For odd length: centers the ref allele
+            # For even length: place ref at the middle (seq_len/2) position
             center = pos - 1 + len(ref) // 2
             start = center - self._startRadius
             end = center + self._endRadius
