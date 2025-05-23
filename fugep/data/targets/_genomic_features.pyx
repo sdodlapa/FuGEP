@@ -4,7 +4,7 @@ import numpy as np
 cimport cython
 cimport numpy as np
 
-ctypedef np.int_t DTYPE_t
+ctypedef np.intp_t DTYPE_t
 ctypedef np.float32_t FDTYPE_t
 
 @cython.boundscheck(False)

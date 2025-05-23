@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: fugep
 Version: 0.4.8
 Summary: framework for developing sequence-level deep learning networks
@@ -25,6 +25,12 @@ Requires-Dist: seaborn
 Requires-Dist: statsmodels
 Requires-Dist: torch>=0.4.1
 Requires-Dist: bioPython>=1.73
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: summary
 
-# Dev-FGen-Pred-FuGEP
-The implementation of the framework for **Fu**nctional **G**enomics **E**vent **P**rediction (**FuGEP**)
+# The implementation of the framework for **Fu**nctional **G**enomics **E**vent **P**rediction (**FuGEP**)
