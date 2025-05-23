@@ -122,25 +122,75 @@ class PeakGVarEvaluator(GVarEvaluator):
             alt = ''
         refLen = len(ref)
         altLen = len(alt)
+        
+        # Debug the input shapes
+        print(f"DEBUG: _processAlt - refSeqEnc shape: {refSeqEnc.shape if hasattr(refSeqEnc, 'shape') else 'unknown'}")
+        
+        # Make sure we maintain consistent sequence shapes
+        expected_shape = refSeqEnc.shape
+        
         if altLen > len(refSeqEnc):
             sequence = _truncate_sequence(alt, len(refSeqEnc))
-            return self._refSeq.sequence_to_encoding(sequence)
+            encoded = self._refSeq.sequence_to_encoding(sequence)
+            
+            # Ensure encoded has the same shape as refSeqEnc
+            if hasattr(encoded, 'shape') and encoded.shape != expected_shape:
+                print(f"DEBUG: encoded shape mismatch: {encoded.shape} vs expected {expected_shape}")
+                if len(encoded.shape) < len(expected_shape):
+                    # Handle case where encoded is missing dimensions
+                    reshaped = np.zeros(expected_shape, dtype=encoded.dtype)
+                    # Copy what we can
+                    if len(encoded.shape) == 1:
+                        reshaped[:encoded.shape[0], 0] = encoded
+                    else:
+                        slices = tuple(slice(0, min(dim, max_dim)) for dim, max_dim in zip(encoded.shape, expected_shape))
+                        reshaped[slices] = encoded[slices]
+                    encoded = reshaped
+            
+            return encoded
     
         altEnc = self._refSeq.sequence_to_encoding(alt)
         if strand == '-':
             altEnc = self._refSeq.getComplementEncoding(altEnc)
         
+        # Create a consistent shape helper function
+        def ensure_consistent_shape(seq, expected_shape=expected_shape):
+            if not hasattr(seq, 'shape') or seq.shape != expected_shape:
+                print(f"DEBUG: Reshaping sequence from {seq.shape if hasattr(seq, 'shape') else 'unknown'} to {expected_shape}")
+                reshaped = np.zeros(expected_shape, dtype=seq.dtype if hasattr(seq, 'dtype') else np.float32)
+                
+                # Copy what we can
+                if not hasattr(seq, 'shape'):
+                    return reshaped
+                    
+                slices = tuple(slice(0, min(dim, max_dim)) for dim, max_dim in zip(seq.shape, expected_shape))
+                try:
+                    if len(seq.shape) == 1 and len(expected_shape) > 1:
+                        # Handle 1D to 2D conversion
+                        for i in range(min(seq.shape[0], expected_shape[0])):
+                            reshaped[i, 0] = seq[i]
+                    else:
+                        # Normal copy with slices
+                        reshaped[slices] = seq[slices]
+                except Exception as e:
+                    print(f"DEBUG: Error during reshaping: {e}")
+                    # Last resort fallback
+                    return np.zeros(expected_shape, dtype=seq.dtype if hasattr(seq, 'dtype') else np.float32)
+                    
+                return reshaped
+            return seq
+        
         if refLen == altLen:  # substitution
             startPos, endPos = self._getRefIdxs(refLen)
             sequence = np.vstack([refSeqEnc[:startPos, :], altEnc, refSeqEnc[endPos:, :]])
-            return sequence
+            return ensure_consistent_shape(sequence)
         elif altLen > refLen:  # insertion
             startPos, endPos = self._getRefIdxs(refLen)
             sequence = np.vstack([refSeqEnc[:startPos, :], altEnc, refSeqEnc[endPos:, :]])
             truncStart = (len(sequence) - refSeqEnc.shape[0]) // 2
             truncEnd = truncStart + refSeqEnc.shape[0]
             sequence = sequence[truncStart:truncEnd, :]
-            return sequence
+            return ensure_consistent_shape(sequence)
         else:  # deletion
             lhs = self._refSeq.get_sequence_from_coords(chrom,
                 start - refLen // 2 + altLen // 2,
@@ -149,7 +199,8 @@ class PeakGVarEvaluator(GVarEvaluator):
                 end + math.ceil(refLen / 2.) - math.ceil(altLen / 2.),
                 pad = True)
             sequence = lhs + alt + rhs
-            return self._refSeq.sequence_to_encoding(sequence)
+            encoded = self._refSeq.sequence_to_encoding(sequence)
+            return ensure_consistent_shape(encoded)
     
     
     def _handleStandardRef(self, refEnc, seqEnc):
@@ -222,8 +273,71 @@ class PeakGVarEvaluator(GVarEvaluator):
         None
     
         """
-        batchRefSeqs = np.array(batchRefSeqs)
-        batchAltSeqs = np.array(batchAltSeqs)
+        # Debug information about the batch shapes
+        if len(batchRefSeqs) > 0:
+            print(f"DEBUG: First ref seq shape: {batchRefSeqs[0].shape if hasattr(batchRefSeqs[0], 'shape') else 'unknown'}")
+            print(f"DEBUG: Number of ref sequences: {len(batchRefSeqs)}")
+            seq_shapes = [seq.shape if hasattr(seq, 'shape') else None for seq in batchRefSeqs]
+            unique_shapes = set(str(shape) for shape in seq_shapes if shape is not None)
+            print(f"DEBUG: Unique ref seq shapes: {unique_shapes}")
+        
+        # Check for inconsistent sequence shapes and handle them
+        try:
+            batchRefSeqs = np.array(batchRefSeqs)
+            batchAltSeqs = np.array(batchAltSeqs)
+        except ValueError as e:
+            print(f"DEBUG: Error converting sequences to numpy arrays: {e}")
+            print("DEBUG: Attempting to pad sequences to uniform length...")
+            
+            # Find the maximum dimensions for padding
+            max_shape = None
+            for seq in batchRefSeqs:
+                if hasattr(seq, 'shape'):
+                    if max_shape is None:
+                        max_shape = list(seq.shape)
+                    else:
+                        for i, dim in enumerate(seq.shape):
+                            if i >= len(max_shape):
+                                max_shape.append(dim)
+                            elif dim > max_shape[i]:
+                                max_shape[i] = dim
+            
+            if max_shape is None:
+                raise ValueError("Cannot determine shape for padding sequences")
+                
+            print(f"DEBUG: Padding sequences to shape: {max_shape}")
+            
+            # Pad sequences to uniform size
+            padded_ref_seqs = []
+            padded_alt_seqs = []
+            
+            for seq in batchRefSeqs:
+                if hasattr(seq, 'shape'):
+                    # Create padded array
+                    padded = np.zeros(max_shape, dtype=seq.dtype)
+                    # Copy original data
+                    slices = tuple(slice(0, min(dim, max_dim)) for dim, max_dim in zip(seq.shape, max_shape))
+                    padded[slices] = seq[slices]
+                    padded_ref_seqs.append(padded)
+                else:
+                    padded_ref_seqs.append(seq)  # Keep as is if not ndarray
+            
+            for seq in batchAltSeqs:
+                if hasattr(seq, 'shape'):
+                    # Create padded array
+                    padded = np.zeros(max_shape, dtype=seq.dtype)
+                    # Copy original data
+                    slices = tuple(slice(0, min(dim, max_dim)) for dim, max_dim in zip(seq.shape, max_shape))
+                    padded[slices] = seq[slices]
+                    padded_alt_seqs.append(padded)
+                else:
+                    padded_alt_seqs.append(seq)  # Keep as is if not ndarray
+            
+            # Try converting again
+            batchRefSeqs = np.array(padded_ref_seqs)
+            batchAltSeqs = np.array(padded_alt_seqs)
+            print(f"DEBUG: After padding - ref shape: {batchRefSeqs.shape}, alt shape: {batchAltSeqs.shape}")
+        
         batchSeqs = np.concatenate([batchRefSeqs, batchAltSeqs])
         # if (batchRefSeqs.shape[0] != self._batchSize) and (batchAltSeqs.shape[0] != self._batchSize):
         #     print(f'ref shape: {batchRefSeqs.shape}, alt shape: {batchAltSeqs.shape}, batch size: {self._batchSize}')
@@ -343,7 +457,13 @@ class PeakGVarEvaluator(GVarEvaluator):
                     self._refSeq.BASES_ARR, self._refSeq.COMPLEMENTARY_BASE_DICT)
                 altSeqEnc = get_reverse_complement_encoding(altSeqEnc,
                     self._refSeq.BASES_ARR, self._refSeq.COMPLEMENTARY_BASE_DICT)
-                
+            
+            # Debug information about sequence shapes
+            if hasattr(refSeqEnc, 'shape'):
+                if ix < 5 or len(batchRefSeqs) == 0 or (len(batchRefSeqs) > 0 and 
+                        hasattr(batchRefSeqs[0], 'shape') and batchRefSeqs[0].shape != refSeqEnc.shape):
+                    print(f"DEBUG: Variant {ix} ({chrom}:{pos}) - refSeqEnc shape: {refSeqEnc.shape}, altSeqEnc shape: {altSeqEnc.shape if hasattr(altSeqEnc, 'shape') else 'unknown'}")
+            
             batchRefSeqs.append(refSeqEnc)
             batchAltSeqs.append(altSeqEnc)
 
