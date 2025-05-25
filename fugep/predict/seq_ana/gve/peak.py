@@ -124,7 +124,7 @@ class PeakGVarEvaluator(GVarEvaluator):
         altLen = len(alt)
         
         # Debug the input shapes
-        print(f"DEBUG: _processAlt - refSeqEnc shape: {refSeqEnc.shape if hasattr(refSeqEnc, 'shape') else 'unknown'}")
+        logger.debug(f"_processAlt - refSeqEnc shape: {refSeqEnc.shape if hasattr(refSeqEnc, 'shape') else 'unknown'}")
         
         # Make sure we maintain consistent sequence shapes
         expected_shape = refSeqEnc.shape
@@ -135,7 +135,7 @@ class PeakGVarEvaluator(GVarEvaluator):
             
             # Ensure encoded has the same shape as refSeqEnc
             if hasattr(encoded, 'shape') and encoded.shape != expected_shape:
-                print(f"DEBUG: encoded shape mismatch: {encoded.shape} vs expected {expected_shape}")
+                logger.debug(f"encoded shape mismatch: {encoded.shape} vs expected {expected_shape}")
                 if len(encoded.shape) < len(expected_shape):
                     # Handle case where encoded is missing dimensions
                     reshaped = np.zeros(expected_shape, dtype=encoded.dtype)
@@ -279,7 +279,7 @@ class PeakGVarEvaluator(GVarEvaluator):
             print(f"DEBUG: Number of ref sequences: {len(batchRefSeqs)}")
             seq_shapes = [seq.shape if hasattr(seq, 'shape') else None for seq in batchRefSeqs]
             unique_shapes = set(str(shape) for shape in seq_shapes if shape is not None)
-            print(f"DEBUG: Unique ref seq shapes: {unique_shapes}")
+            logger.debug(f"Unique ref seq shapes: {unique_shapes}")
         
         # Check for inconsistent sequence shapes and handle them
         try:
